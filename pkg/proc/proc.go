@@ -179,6 +179,14 @@ func Continue(dbp *Target) error {
 			return nil
 		}
 		dbp.ClearAllGCache()
+		if dbp.Process.CurrentDirection() == Forward {
+			for _, th := range dbp.ThreadList() {
+				if th.Breakpoint().Breakpoint == nil {
+					continue
+				}
+				dbp.threadStepInstruction(th)
+			}
+		}
 		trapthread, additionalTrapThreads, err := dbp.ContinueOnce()
 		if err != nil {
 			return err
@@ -530,19 +538,27 @@ func StepInstruction(dbp *Target) (err error) {
 	if ok, err := dbp.Valid(); !ok {
 		return err
 	}
-	thread.Breakpoint().Clear()
-	err = thread.StepInstruction()
-	if err != nil {
+
+	if err := dbp.threadStepInstruction(thread); err != nil {
 		return err
 	}
-	err = thread.SetCurrentBreakpoint(true)
-	if err != nil {
-		return err
-	}
+
 	if tg, _ := GetG(thread); tg != nil {
 		dbp.SetSelectedGoroutine(tg)
 	}
 	return nil
+}
+
+func (dbp *Target) threadStepInstruction(thread Thread) error {
+	bp := thread.Breakpoint()
+	if bp.Breakpoint != nil {
+		dbp.Process.ClearBreakpointFn(bp.Addr, bp.OriginalData)
+		defer dbp.Process.WriteBreakpointFn(bp.Addr)
+	}
+	if err := thread.StepInstruction(); err != nil {
+		return err
+	}
+	return thread.SetCurrentBreakpoint(true)
 }
 
 // GoroutinesInfo searches for goroutines starting at index 'start', and
